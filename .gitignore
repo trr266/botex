@@ -29,6 +29,8 @@ tests/botex_participants.csv
 tests/botex_response.csv
 tests/otree_data.csv
 tests/otree_data_full_history.csv
+tests/otree_ptimes.csv
+tests/otree_ptimes_full_history.csv
 tests/test_session.csv
 tests/test_participant.csv
 tests/test_group.csv

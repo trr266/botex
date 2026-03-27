@@ -430,6 +430,7 @@ def run_bots_on_session(
         api_base: str | None = None,
         throttle: bool = False,
         full_conv_history: bool = False,
+        markdown: bool = True,
         user_prompts: dict | None = None,
         already_started: bool = False,
         wait: bool = True,
@@ -454,7 +455,8 @@ def run_bots_on_session(
             
             If you want to use local models, we suggest that you use llama.cpp, 
             In this case, set this string to `lamacpp` and set the URL of your 
-            llama.cpp server in `api_base`. If you want botex to start the  llama.cpp server for you, run `start_llamacpp_sever()` prior to 
+            llama.cpp server in `api_base`. If you want botex to start the  
+            llama.cpp server for you, run `start_llamacpp_sever()` prior to 
             running run_bots_on_session().
         api_key (str): The API key for the model that you use. If None (the 
             default), it will be obtained from environment variables by liteLLM 
@@ -471,6 +473,10 @@ def run_bots_on_session(
         full_conv_history (bool): Whether to keep the full conversation history.
             This will increase token use and only work with very short 
             experiments. Default is False.
+        markdown (bool): Since version 0.2.1 the scraped webpage body is 
+            converted to Markdown prior to passing it to the botex bots by 
+            default. Set this to False if you want to pass the unformatted text 
+            instead (approach used prior version 0.2.1).
         user_prompts (dict): A dictionary of user prompts to override the 
             default prompts that the bot uses. The keys should be one or more 
             of the following:
@@ -495,7 +501,8 @@ def run_bots_on_session(
             `litellm.completion()`.
         
     Returns:
-        None (bot conversation logs are stored in database) if wait is True. A list of Threads running the bots if wait is False.
+        None (bot conversation logs are stored in database) if wait is True. 
+        A list of Threads running the bots if wait is False.
 
     ??? tip "Additional details"
     
@@ -576,6 +583,7 @@ def run_bots_on_session(
     thread_kwargs = {
         'botex_db': botex_db, 'session_id': session_id, 
         'full_conv_history': full_conv_history, 
+        'markdown': markdown,
         'model': model, 'api_key': api_key,
         'api_base': api_base,
         'user_prompts': user_prompts,
@@ -605,6 +613,7 @@ def run_single_bot(
     api_base: str | None = None,
     throttle: bool = False, 
     full_conv_history: bool = False,
+    markdown: bool = True,
     user_prompts: dict | None = None,
     wait: bool = True,
     **kwargs
@@ -624,6 +633,10 @@ def run_single_bot(
         full_conv_history (bool): Whether to keep the full conversation history.
             This will increase token use and only work with very short 
             experiments. Default is False.
+        markdown (bool): Since version 0.2.1 the scraped webpage body is 
+            converted to Markdown prior to passing it to the botex bots by 
+            default. Set this to False if you want to pass the unformatted text 
+            instead (approach used prior version 0.2.1).
         model (str): The model to use for the bot. Default is 
             `gpt-4o-2024-08-06` from OpenAI vie LiteLLM. It needs to be a model 
             that supports structured outputs. For OpenAI, these are 
@@ -763,6 +776,7 @@ def run_single_bot(
             model = model, 
             throttle = throttle, 
             full_conv_history = full_conv_history,
+            markdown = markdown,
             user_prompts = user_prompts,
             **kwargs
         )
@@ -776,6 +790,7 @@ def run_single_bot(
                 model = model, 
                 throttle = throttle, 
                 full_conv_history = full_conv_history,
+                markdown = markdown,
                 user_prompts = user_prompts,
                 **kwargs
             )
@@ -863,6 +878,84 @@ def export_otree_data(
             else:
                 if time.time() > time_out:
                     logger.error("oTree CSV file download failed.")
+                    break
+        driver.quit()
+
+def export_otree_page_times(
+        csv_file: str,
+        server_url: str | None = None, 
+        admin_name: str | None = "admin", 
+        admin_password: str | None = None,
+        time_out: int | None = 10
+    ) -> None:
+    """
+    Export Page times data from an oTree server.
+
+    Args:
+        csv_file (str): Path to the CSV file where the data should be stored.
+        server_url (str, optional): URL of the oTree server. If None 
+            (the default), the function will try to use the oTree server URL 
+            from the environment variable OTREE_SERVER_URL.
+        admin_name (str, optional): Admin username. Defaults to "admin".
+        admin_password (str, optional): Admin password. If None (the default),
+            the function will try to use the oTree admin password from the 
+            environment variable OTREE_ADMIN_PASSWORD.
+        time_out (int, optional): Timeout in seconds to wait for the download. 
+            Defaults to 10.
+
+    Raises:
+        Exception: If the download does not succeed within the timeout.
+
+    Returns
+        None (data is stored in the CSV file).
+    
+    Detail:
+        The function uses Selenium and a headless Chrome browser to download 
+        the CSV file. Ideally, it would use an oTree API endpoint instead.
+    """
+
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--log-level=3")
+    chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        prefs = {"download.default_directory": tmp_dir}
+        chrome_options.add_experimental_option("prefs", prefs)
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_window_size(1920, 1400)
+        if server_url is None:
+            server_url = os.getenv("OTREE_SERVER_URL")
+        if admin_password is None:
+            admin_password = os.getenv("OTREE_ADMIN_PASSWORD")
+
+        export_url = f"{server_url}/ExportPageTimes"
+        driver.get(export_url)
+        current_url = driver.current_url
+        if "login" in current_url:
+            driver.find_element(By.ID, "id_username").send_keys(admin_name)
+            driver.find_element(By.ID, "id_password").send_keys(admin_password)
+            submit_button = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "btn-login"))
+            )
+            submit_button.click()
+            WebDriverWait(driver, 10).until(EC.url_changes(current_url))
+            driver.get(export_url)
+        
+        time_out = time.time() + time_out
+        while True:            
+            time.sleep(1)
+            csv_files = [f for f in os.listdir(tmp_dir) if f.endswith(".csv")]
+            if len(csv_files) == 1:
+                shutil.move(f"{tmp_dir}/{csv_files[0]}", csv_file)
+                logger.info("oTree Page Times CSV file downloaded.")
+                break
+            else:
+                if time.time() > time_out:
+                    logger.error("oTree Page Times CSV file download failed.")
                     break
         driver.quit()
 

@@ -71,6 +71,7 @@ def test_can_survey_be_completed_by_bots(model):
         botex_db="tests/botex.sqlite3"
     )
     export_otree_data('tests/otree_data.csv')
+    export_otree_page_times('tests/otree_ptimes.csv')
     botex.stop_otree_server(otree_proc)
     normalize_otree_data('tests/otree_data.csv')
     assert True
@@ -103,6 +104,8 @@ def test_can_survey_be_completed_by_bots_full_hist(model):
         full_conv_history=True
     )
     export_otree_data('tests/otree_data_full_history.csv')
+    export_otree_page_times('tests/otree_ptimes_full_history.csv')
+
     botex.stop_otree_server(otree_proc)
     normalize_otree_data('tests/otree_data_full_history.csv')
     assert True

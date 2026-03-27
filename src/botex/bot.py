@@ -10,6 +10,7 @@ logger = logging.getLogger("botex")
 
 import warnings
 from importlib.metadata import version, PackageNotFoundError
+from html_to_markdown import convert
 
 # Starting with v1.56.2, LiteLLM triggers a user Pydantic user warning
 # we will filter this out until the issue is resolved  
@@ -50,7 +51,21 @@ MAX_NUM_OF_ATTEMPTS_TO_START_CHROME = 5
 
 TEST_FORM_VALIDATION_ERRORS = False
 
-def create_prompts(user_prompts):
+def create_prompts(user_prompts: dict | None = None) -> dict:
+    """
+    Returns a dictionary of prompts that are used to communicate with botex 
+    bots. If provided with a dictionary of customized user prompts it returns 
+    a refined dictionary where the respective default prompts are replaced with 
+    user provided prompts. 
+
+    Args:
+        user_prompts (dict): A dictionary of user prompts to replace the 
+            default prompts. Defaults to None.
+
+    Returns:
+        dict: The dictionary of prompts that are used to communicate with the
+            botex bots
+    """
     with open(
         files('botex').joinpath('bot_prompts.csv'), 
         'r', newline='', encoding='utf-8'
@@ -92,6 +107,7 @@ def run_bot(**kwargs):
     full_conv_history = kwargs.pop('full_conv_history')
     user_prompts = kwargs.pop('user_prompts')
     prompts = create_prompts(user_prompts)
+    markdown = kwargs.pop('markdown')
 
     if model == "llamacpp":
         llamacpp = LlamaCpp(kwargs.get("api_base"))
@@ -163,7 +179,9 @@ def run_bot(**kwargs):
         while attempts < max_attempts:
             try:
                 WebDriverWait(dr, timeout).until(
-                    lambda x: x.find_element(By.CLASS_NAME, 'otree-form')
+                    EC.visibility_of_element_located(
+                        (By.CLASS_NAME, "otree-form")
+                    )
                 )
                 break # Exit the loop if successful
             except TimeoutException:
@@ -180,11 +198,19 @@ def run_bot(**kwargs):
         
     def scan_page(dr):
         dr.get(url)
-        text = dr.find_element(By.TAG_NAME, "body").text
-        debug_text = dr.find_elements(By.CLASS_NAME, "debug-info")
-        if debug_text:
-            text = text.replace(debug_text[0].text, "")
-
+        if markdown:
+            html = dr.execute_script("""
+                var body = document.body.cloneNode(true);
+                var el = body.querySelector('.debug-info');
+                if (el) el.remove();
+                return body.innerHTML;
+            """)
+            text = convert(html)
+        else:
+            text = dr.find_element(By.TAG_NAME, "body").text
+            debug_text = dr.find_elements(By.CLASS_NAME, "debug-info")
+            if debug_text:
+                text = text.replace(debug_text[0].text, "")
         
         wait_page = dr.find_elements(By.CLASS_NAME, 'otree-wait-page__body') != []
         if wait_page:
@@ -535,6 +561,7 @@ def run_bot(**kwargs):
                 text, wait_page, next_button, questions = scan_page(dr)
                 break
             except:
+                logging.exception('')
                 attempts += 1
                 logger.warning("Failed to scrape my oTree URL. Trying again.")
                 if attempts == 5:

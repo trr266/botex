@@ -37,6 +37,16 @@ def export_otree_data(csv_file):
     for p in participants:
         assert p['participant._current_page_name'] == 'Thanks'
 
+def export_otree_page_times(csv_file):
+    botex.export_otree_page_times(csv_file)
+    assert os.path.exists(csv_file)
+    try:
+        with open(csv_file) as f:
+            ptimes = list(csv.DictReader(f))
+    except:
+        assert False
+    assert len(ptimes) == 12
+
 def normalize_otree_data(csv_file):
     dta = botex.normalize_otree_data(
         csv_file, store_as_csv=True, data_exp_path= "tests",
