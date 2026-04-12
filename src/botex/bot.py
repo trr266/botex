@@ -1,3 +1,4 @@
+import html
 import json
 import time
 from datetime import datetime, timezone
@@ -38,7 +39,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 from .llamacpp import LlamaCpp
 from .schemas import create_answers_response_model, EndSchema, Phase, StartSchema, SummarySchema
@@ -137,16 +138,18 @@ def run_bot(**kwargs):
         # Find all field validation errors 
         validation_errors = {}
         errors = dr.find_elements(By.CSS_SELECTOR, "input:invalid")
-        if len(errors) == 0: return validation_errors
         for e in errors:
             if e.get_attribute("validationMessage"): 
                 validation_errors[e.get_attribute("id")] = {
                     "label": e.accessible_name,
                     "validation_message": e.get_attribute("validationMessage")
                 }
+        otree_form_errors = dr.find_elements(By.CLASS_NAME, "otree-form-errors")
+        if otree_form_errors:
+            validation_errors["otree_form"] = otree_form_errors[0].text
         if len(validation_errors) == 0: return validation_errors
         url = dr.current_url
-        dr.get(url)
+        get_otree_page(dr, url)
         if not (dr.page_source == old_page_source):
             # We are on the next page - no validation errors
             return {}
@@ -186,38 +189,142 @@ def run_bot(**kwargs):
                 break # Exit the loop if successful
             except TimeoutException:
                 attempts += 1
-                if attempts % 60 == 0:
+                if attempts % 6 == 0:
                     logger.info(
-                        f"Waiting for page to load. Attempt {attempts}/{max_attempts}."
+                        "Waiting for page to load (attempt "
+                        f"{attempts}/{max_attempts}, "
+                        f"title of current page '{dr.title}'). Reloading page."
                     )
+                    get_otree_page(dr, url)
                 continue # Retry if a timeout occurs
         if attempts == max_attempts:
             logger.error(f"Timeout on wait page after {max_attempts} attempts.")
             return 'Timeout on wait page.'
+    
+    def get_otree_page(dr, url,attempts = 3, delay = 5):
+        last_exc = None
+        for i in range(attempts):
+            try:
+                dr.get(url)
+                return
+            except WebDriverException as e:
+                logger.warning(
+                    "Failed to load page. Attempt %s/%s. Error message '%s'. "
+                    "Retrying in %s seconds." % (i+1, attempts, str(e), delay))
+                last_exc = e
+                time.sleep(delay)
+            raise last_exc
+    
+    def extract_otree_page_data(dr, url):
+        get_otree_page(dr, url)
 
-        
+        page_data = dr.execute_script("""
+            function isVisible(el) {
+                if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+
+                const style = getComputedStyle(el);
+
+                if (style.display === 'none') return false;
+                if (style.visibility === 'hidden') return false;
+                if (style.visibility === 'collapse') return false;
+                if (style.opacity === '0') return false;
+                if (el.hidden) return false;
+                if (el.closest('[hidden]')) return false;
+
+                return !!(
+                    el.offsetWidth || el.offsetHeight || 
+                    el.getClientRects().length
+                );
+            }
+
+            function shouldAlwaysDrop(el) {
+                if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+
+                const tag = el.tagName.toLowerCase();
+                if (
+                    ['script', 'style', 'noscript', 'template'].includes(tag)
+                ) return true;
+
+                if (el.matches('.debug-info')) return true;
+
+                return false;
+            }
+
+            function cloneVisible(node) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const text = node.textContent;
+                    return text && text.trim() ? document.createTextNode(text) : null;
+                }
+
+                if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+                if (shouldAlwaysDrop(node)) return null;
+                if (!isVisible(node)) return null;
+
+                const clone = node.cloneNode(false);
+
+                for (const child of node.childNodes) {
+                    const childClone = cloneVisible(child);
+                    if (childClone) {
+                        clone.appendChild(childClone);
+                    }
+                }
+
+                return clone;
+            }
+
+            const waitPage = document.querySelector('.otree-wait-page');
+            const err = document.querySelector('#_otree-server-error');
+
+            const error = !!(
+                err &&
+                isVisible(err)
+            );
+
+            const cleanedBody = cloneVisible(document.body);
+
+            let html = '';
+            let text = '';
+
+            if (cleanedBody) {
+                html = cleanedBody.innerHTML;
+                text = (cleanedBody.innerText || cleanedBody.textContent || '').trim();
+            }
+
+            const errorText = error ? ((err.innerText || err.textContent || '').trim()) : '';
+
+            return {
+                html: html,
+                text: text,
+                wait_page: !!waitPage,
+                error: error,
+                error_text: errorText
+            };
+        """)
+        return page_data
+
     def scan_page(dr):
-        dr.get(url)
+        page_data = extract_otree_page_data(dr, url)
+
         if markdown:
-            html = dr.execute_script("""
-                var body = document.body.cloneNode(true);
-                var el = body.querySelector('.debug-info');
-                if (el) el.remove();
-                return body.innerHTML;
-            """)
-            text = convert(html)
+            text = convert(page_data['html'])
         else:
-            text = dr.find_element(By.TAG_NAME, "body").text
-            debug_text = dr.find_elements(By.CLASS_NAME, "debug-info")
-            if debug_text:
-                text = text.replace(debug_text[0].text, "")
-        
-        wait_page = dr.find_elements(By.CLASS_NAME, 'otree-wait-page__body') != []
+            text = page_data['text']
+
+        wait_page = page_data['wait_page']
+
+        if wait_page and page_data['error']:
+            logger.warning(
+                f"oTree server error detected on wait page. "
+                f"Error message: '{page_data['error_text']}'."
+            )
+
         if wait_page:
             return {
                 "text": text, "wait_page": wait_page, 
                 "next_button": None, "questions": None
             }
+        
         nb = dr.find_elements(By.CLASS_NAME, 'otree-btn-next')
         if len(nb) > 0: next_button = nb[0] 
         else: next_button = None
@@ -636,10 +743,12 @@ def run_bot(**kwargs):
                 else: 
                     logger.warning(
                         "Bot's answers were likely erroneous, but no validation "
-                        "errors were found. This should not happen."
+                        "errors were found. This should not happen. "
                         "Most likely something is seriously wrong here."
                     )
                     message = prompts['page_not_changed_no_vm'] + message
+        else:
+            answer_attempts = 0
 
         resp = llm_send_message(
             message, Phase.middle, check_response, questions=questions
@@ -703,7 +812,9 @@ def run_bot(**kwargs):
                 dr, next_button, check_errors=True
             )
             if validation_errors:
-                if not set(validation_errors.keys()).issubset(resp['answers'].keys()):
+                if not set(validation_errors.keys()).issubset(
+                    list(resp['answers'].keys()) + ["otree_form"]
+                ):
                     logger.warn(
                         "The validation errors returned by oTree do not match the questions. "
                         "This should not happen. "
@@ -712,7 +823,8 @@ def run_bot(**kwargs):
                     validation_errors = {}
                 else:
                     for id_, v in validation_errors.items():
-                        validation_errors[id_]["invalid_answer"] = resp['answers'][id_]['answer']
+                        if id_ != "otree_form":
+                            validation_errors[id_]["invalid_answer"] = resp['answers'][id_]['answer']
                     logger.warning(
                         f"oTree returned validation errors: {validation_errors}"
                     )
