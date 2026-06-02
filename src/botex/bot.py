@@ -514,7 +514,7 @@ def run_bot(**kwargs):
         check_result = {"error": [], "error_log": []}
         check_result = validate_response(resp, response_format, check_result)
         
-        if not resp['understood']:
+        if 'understood' in resp and not resp['understood']:
             error_log = "Bot did not understand the message."
             check_result["error_log"].append(error_log)
             check_result["error"].append("not_understood")
@@ -528,10 +528,9 @@ def run_bot(**kwargs):
         check_result = {"error": [], "error_log": []}
         check_result = validate_response(resp, response_format, check_result)
         
-        if resp["confused"]:
+        if 'confused' in resp and resp['confused']:
             check_result["error_log"].append("Bot is confused.")
             check_result["error"].append("confused")
-
 
         if check_result.get("error"):
             return False, check_result["error"], check_result["error_log"]
@@ -542,9 +541,10 @@ def run_bot(**kwargs):
         check_result = {"error": [], "error_log": []}
         check_result = validate_response(resp, response_format, check_result)
 
-        if resp["confused"]:
+        if 'confused' in resp and resp['confused']:
             check_result["error_log"].append("Bot is confused.")
             check_result["error"].append("confused")
+
         if check_result.get("error"):
             return False, check_result["error"], check_result["error_log"]
         return True, None, None

@@ -37,7 +37,7 @@ dependencies = [
     'pydantic-settings',
     'instructor',
     'python-dotenv',
-    'html-to-markdown'
+    'html-to-markdown==2.29.0'
 ]
 
 [project.urls]

@@ -43,11 +43,6 @@ def model_supports_response_schema(
         bool: True if the model supports response schema, False otherwise.
     """
     if model == "llamacpp": return True 
-    if custom_llm_provider is None or not custom_llm_provider:
-        if "/" not in model:
-            custom_llm_provider = "openai"
-        else:
-            custom_llm_provider = model.split("/")[0]
     params = litellm.get_supported_openai_params(
         model=model, custom_llm_provider=custom_llm_provider
     )

@@ -447,7 +447,7 @@ def run_bots_on_session(
             If None (the default), it will be obtained from the environment 
             variable BOTEX_DB.
         model (str): The model to use for the bot. Default is 
-            `gpt-4o-2024-08-06` from OpenAI vie LiteLLM. It needs to be a model 
+            `gpt-4o-2024-08-06` from OpenAI via LiteLLM. It needs to be a model 
             that supports structured outputs. For OpenAI, these are 
             gpt-4o-mini-2024-07-18 and later or gpt-4o-2024-08-06 and later. If 
             you use a commercial model, You need to provide an API key in the 
